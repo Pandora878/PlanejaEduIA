@@ -1,37 +1,23 @@
-# PlanejaEdu — versão gratuita
+# PlanejaEdu — Cloudflare Pages
 
-Esta versão é um protótipo funcional estático e **não possui planos pagos nem depende de créditos da OpenAI**.
+Projeto estático preparado para publicação no **Cloudflare Pages**.
 
-## Incluído
-- Tela inicial com botão **Começar**.
-- Antes do login, aparece a opção de contribuição voluntária por Pix.
-- Login, criação de conta, Google (modo de demonstração visual) e modo demonstração.
-- Dashboard de professora.
-- Criador local de plano de aula e outros materiais.
-- Cabeçalhos institucionais selecionáveis, incluindo:
-  - Escola Municipal Professora Irmã Blandina Cisz
-  - Escola Estadual
-  - Escola Particular
-  - Irmã Blandina
-  - Integral (Lajeado Grande)
-- Turmas com segmento e turno.
-- Cadastro de alunos.
-- Chamada automática baseada nos alunos cadastrados.
-- Calendário.
-- Biblioteca local de materiais.
-- Configurações de perfil e modo escuro.
-- Ícones Lucide via CDN.
-- Persistência no navegador com localStorage.
+## Publicação sem GitHub
+1. Entre no Cloudflare Dashboard.
+2. Vá em **Workers & Pages**.
+3. Crie uma aplicação do tipo **Pages** com upload direto de assets.
+4. Descompacte este ZIP e envie **o conteúdo desta pasta**, onde `index.html` fica na raiz.
+5. Não configure build command.
+6. Diretório de saída: a própria pasta enviada (raiz).
 
-## Importante sobre a IA
-Para manter o projeto totalmente gratuito, o gerador desta versão funciona localmente e não chama a API da OpenAI. Portanto, não precisa de OPENAI_API_KEY e não haverá erro de créditos da OpenAI.
+## Importante
+- Não precisa de `OPENAI_API_KEY` nesta versão.
+- O gerador local de IA é executado no navegador e depende do download do modelo na primeira utilização.
+- O projeto usa `localStorage` para os dados do protótipo.
+- O botão Google desta versão é visual/demonstrativo; para login Google real, conecte Firebase Authentication.
+- Pix é voluntário: 49 99967-4823.
+- Não há planos pagos.
 
-## Como publicar no Netlify
-Envie a pasta/ZIP para o Netlify. Não configure OPENAI_API_KEY para esta versão.
-
-## WhatsApp para lista de alunos
-A versão de base permite cadastrar os alunos diretamente. O botão de envio por WhatsApp pode ser conectado ao número da professora quando você quiser adicionar essa etapa.
-
-## Pix
-Chave exibida no projeto: 49 99967-4823.
-O pagamento é voluntário e o site continua gratuito sem contribuição.
+## Arquivos Cloudflare
+- `_headers`: cabeçalhos básicos de segurança/cache.
+- `_redirects`: fallback para `index.html` em rotas de SPA.
