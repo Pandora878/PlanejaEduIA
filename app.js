@@ -1,0 +1,292 @@
+const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
+const KEY="planejaedu_data_v4", PIX="49 99967-4823";
+const defaultData={user:null,theme:"light",headers:[
+{name:"Escola Municipal Professora Irmã Blandina Cisz",desc:"Município de Lajeado Grande",type:"Escola municipal"},
+{name:"Escola Estadual",desc:"Rede estadual de ensino",type:"Escola estadual"},
+{name:"Escola Particular",desc:"Instituição particular",type:"Escola particular"},
+{name:"Irmã Blandina",desc:"Secretaria Municipal de Educação",type:"Secretaria"},
+{name:"Integral (Lajeado Grande)",desc:"Cabeçalho de projeto",type:"Integral"}
+],classes:[],students:[],materials:[]};
+
+// IA LOCAL GRATUITA: roda no navegador usando Transformers.js + Qwen2.5-0.5B-Instruct.
+// Não usa OpenAI, não exige chave e não envia o conteúdo da professora para um servidor de IA.
+let localAI=null;
+let localAILoading=null;
+let localAIMode='WebGPU';
+
+async function loadLocalAI(statusElId='ai-status'){
+  const status=document.getElementById(statusElId);
+  const setStatus=(msg,kind='')=>{if(status){status.textContent=msg;status.className='ai-status '+kind;}};
+  if(localAI) return localAI;
+  if(localAILoading) return localAILoading;
+  localAILoading=(async()=>{
+    setStatus('Baixando a IA gratuita para este navegador. Na primeira vez pode demorar alguns minutos…','loading');
+    try{
+      const mod=await import('https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.8.1');
+      const {pipeline,env}=mod;
+      env.allowLocalModels=false;
+      const model='onnx-community/Qwen2.5-0.5B-Instruct';
+      if(navigator.gpu){
+        try{
+          localAIMode='WebGPU';
+          localAI=await pipeline('text-generation',model,{dtype:'q4',device:'webgpu'});
+        }catch(webgpuError){
+          console.warn('WebGPU indisponível; usando WASM.',webgpuError);
+          localAIMode='WASM';
+          localAI=await pipeline('text-generation',model,{dtype:'q4',device:'wasm'});
+        }
+      }else{
+        localAIMode='WASM';
+        localAI=await pipeline('text-generation',model,{dtype:'q4',device:'wasm'});
+      }
+      setStatus(`IA carregada no seu dispositivo (${localAIMode}).`,'ready');
+      return localAI;
+    }catch(err){
+      console.error(err);
+      localAI=null;
+      localAIMode='offline';
+      setStatus('Não foi possível carregar a IA local. O gerador estruturado continua disponível.','error');
+      throw err;
+    }finally{localAILoading=null;}
+  })();
+  return localAILoading;
+}
+
+function aiSystemPrompt(type){
+ return `Você é o PlanejaEdu, um assistente pedagógico brasileiro. Produza material REALMENTE UTILIZÁVEL por uma professora, em português do Brasil, sem frases genéricas. Respeite exatamente o tipo solicitado: ${type}. Seja específico ao ano, disciplina e tema. Não diga que é uma IA, não peça para a professora preencher partes que você consegue criar. Use títulos claros, exemplos concretos, atividades aplicáveis e avaliação. Quando faltarem dados, faça uma escolha pedagógica razoável e deixe isso explícito.`;
+}
+
+async function generateWithAI({type,grade,sub,prompt,shift,header,conversation=false}){
+ const generator=await loadLocalAI('ai-status');
+ const userPrompt=conversation
+   ? prompt
+   : `Tipo de material: ${type}\nAno/série: ${grade}\nDisciplina: ${sub}\nTurno: ${shift}\nCabeçalho: ${header}\nTema/pedido da professora: ${prompt}\n\nCrie agora o material completo. Para ${type}, inclua todos os elementos que normalmente seriam necessários para uso em sala de aula. Se for Slides, entregue 8 slides numerados com título, texto curto, atividade/visual sugerido e fala da professora. Se for Prova e avaliação, entregue questões variadas e gabarito. Se for Lista de exercícios, entregue exercícios graduados e gabarito. Se for Jogo educativo, crie regras, preparação, rodadas, perguntas e pontuação. Se for Mapa mental, organize uma estrutura hierárquica pronta para visualização. Se for Adaptação, adapte concretamente o material para necessidades educacionais diversas. Se for Comunicação, entregue uma mensagem pronta para enviar. Se for Assistente IA, responda diretamente à pergunta.`;
+ const messages=[{role:'system',content:aiSystemPrompt(type)},{role:'user',content:userPrompt}];
+ const out=await generator(messages,{max_new_tokens:700,temperature:0.65,do_sample:true,return_full_text:false});
+ let text=Array.isArray(out) ? out[0]?.generated_text : (out?.generated_text || '');
+ if(Array.isArray(text)) text=text[text.length-1]?.content || text.map(x=>x.content||'').join('\n');
+ if(!text) throw new Error('A IA não retornou texto.');
+ return String(text).trim();
+}
+
+function showAIPanel(){
+ const el=document.getElementById('ai-status');
+ if(el) el.scrollIntoView({behavior:'smooth',block:'center'});
+}
+
+let data=defaultData;
+try{ const saved=JSON.parse(localStorage.getItem(KEY)||"null"); if(saved && typeof saved==="object") data={...defaultData,...saved,headers:Array.isArray(saved.headers)&&saved.headers.length?saved.headers:defaultData.headers,classes:Array.isArray(saved.classes)?saved.classes:[],students:Array.isArray(saved.students)?saved.students:[],materials:Array.isArray(saved.materials)?saved.materials:[]}; }catch(e){ console.warn("Dados locais corrompidos; iniciando novo espaço.",e); localStorage.removeItem(KEY); }
+function save(){localStorage.setItem(KEY,JSON.stringify(data))}
+function show(id){$$(".screen").forEach(x=>x.classList.add("hidden"));$("#"+id).classList.remove("hidden")}
+function toast(t){const x=$("#toast");x.textContent=t;x.style.display="block";setTimeout(()=>x.style.display="none",2600)}
+function pixModal(){ $("#pix-modal").classList.remove("hidden") }
+function start(){pixModal();show("login")}
+function login(){show("login")}
+function enter(name="Professora"){data.user=name;save();$("#user-name").textContent=name;$("#avatar").textContent=name[0].toUpperCase();show("app-screen");render("home")}
+function pageHead(k,s,b=""){return `<div class="page-head"><div><div class="eyebrow">PLANEJAMENTO ESCOLAR</div><h1>${k}</h1><p class="sub">${s}</p></div>${b}</div>`}
+function render(p){
+  $$(".nav").forEach(n=>n.classList.toggle("active",n.dataset.page===p));
+  let html="";
+  if(p==="home") html=pageHead("Visão geral","Seu espaço pedagógico gratuito.")+`<div class="cards">
+  <div class="stat"><small>Turmas</small><br><b>${data.classes.length}</b></div><div class="stat"><small>Alunos</small><br><b>${data.students.length}</b></div>
+  <div class="stat"><small>Materiais salvos</small><br><b>${data.materials.length}</b></div><div class="stat"><small>Professores ativos</small><br><b>1</b></div></div>
+  <div class="panel"><h2>Comece agora</h2><div class="tool-picker">${["Plano de aula","Slides","Prova e avaliação","Lista de exercícios","Mapa mental","Jogos educativos","Projeto","Adaptação","Comunicação","Ideias de atividades","Resumo","Assistente IA"].map((x,i)=>`<button class="tool-btn" onclick="openGenerator('${x}')"><i class="icon icon-sparkles"></i> ${x}</button>`).join("")}</div></div>`;
+  if(p==="planner") html=generator();
+  if(p==="classes") html=classesPage();
+  if(p==="students") html=studentsPage();
+  if(p==="attendance") html=attendancePage();
+  if(p==="calendar") html=calendarPage();
+  if(p==="headers") html=headersPage();
+  if(p==="library") html=libraryPage();
+  if(p==="settings") html=settingsPage();
+  $("#page").innerHTML=`<div class="page">${html}</div>`;
+}
+function generator(){
+return pageHead("Criar material","Planeje aulas, atividades e avaliações com um gerador pedagógico local.")+
+`<div class="panel"><div class="field"><label>Tipo de material</label><select id="gen-type">${["Plano de aula","Slides","Prova e avaliação","Lista de exercícios","Mapa mental","Jogos educativos","Projeto","Adaptação","Comunicação","Ideias de atividades","Resumo","Assistente IA"].map(x=>`<option>${x}</option>`).join("")}</select></div>
+<div class="grid2"><div class="field"><label>Ano/série</label><input id="gen-grade" placeholder="Ex.: 4º ano"></div><div class="field"><label>Disciplina</label><input id="gen-subject" placeholder="Ex.: Ciências"></div></div>
+<div class="field"><label>O que deseja preparar?</label><textarea id="gen-prompt" rows="5" placeholder="Descreva o tema, objetivo, duração, perfil da turma e o que gostaria de incluir..."></textarea></div>
+<div class="grid2"><div class="field"><label>Cabeçalho</label><select id="gen-header">${data.headers.map((h,i)=>`<option value="${i}">${h.name}</option>`).join("")}</select></div><div class="field"><label>Turno</label><select id="gen-shift"><option>Matutino</option><option>Vespertino</option><option>Noturno</option><option>Integral</option></select></div></div>
+<div class="ai-bar"><div><strong>IA PlanejaEdu</strong><span id="ai-status" class="ai-status">IA local gratuita ainda não carregada.</span></div><button class="ghost" onclick="loadLocalAI()"><i class="icon icon-sparkles"></i> Carregar IA</button></div><button class="primary" onclick="generateLocal()"><i class="icon icon-sparkles"></i> Gerar com IA</button></div>
+<div id="gen-output"></div>`;
+}
+function openGenerator(t){render("planner");setTimeout(()=>$("#gen-type").value=t,0)}
+async function generateLocal(){
+ const type=$('#gen-type').value,grade=$('#gen-grade').value||'turma',sub=$('#gen-subject').value||'a disciplina',prompt=$('#gen-prompt').value||'o tema indicado';
+ const h=data.headers[Number($('#gen-header').value)]?.name||'PlanejaEdu';
+ const shift=$('#gen-shift').value;
+ const out=$('#gen-output');
+ out.innerHTML=`<div class="panel material-panel"><div class="ai-generating"><div class="spinner"></div><div><h3>Preparando sua aula com a IA…</h3><p class="sub">Na primeira utilização, o modelo é baixado para o navegador e depois fica em cache.</p></div></div></div>`;
+ let material=''; let usedAI=false;
+ try{
+   material=await generateWithAI({type,grade,sub,prompt,shift,header:h});
+   usedAI=true;
+ }catch(err){
+   console.warn('IA local indisponível, usando gerador estruturado.',err);
+   material=buildMaterial(type,grade,sub,prompt,shift,h);
+ }
+ data.materials.push({type,date:new Date().toLocaleDateString('pt-BR'),title:prompt,content:material,ai:usedAI});save();
+ let extra='';
+ if(type === 'Slides') extra=`<div class="slide-actions"><button class="primary" onclick="openSlideDeck(${JSON.stringify(prompt)},${JSON.stringify(grade)},${JSON.stringify(sub)},${JSON.stringify(shift)},${JSON.stringify(h)})"><i class="icon icon-presentation"></i> Visualizar apresentação</button><button class="ghost" onclick="downloadPptx(${JSON.stringify(prompt)},${JSON.stringify(grade)},${JSON.stringify(sub)},${JSON.stringify(shift)},${JSON.stringify(h)})"><i class="icon icon-download"></i> Baixar PowerPoint</button></div>`;
+ if(type === 'Prova e avaliação') extra=`<div class="slide-actions"><button class="primary" onclick="printMaterial()"><i class="icon icon-printer"></i> Imprimir avaliação</button><button class="ghost" onclick="toggleAnswerKey()"><i class="icon icon-eye"></i> Mostrar/ocultar gabarito</button></div>`;
+ if(type === 'Lista de exercícios') extra=`<div class="slide-actions"><button class="primary" onclick="printMaterial()"><i class="icon icon-printer"></i> Imprimir lista</button><button class="ghost" onclick="copyText(${JSON.stringify(material)})"><i class="icon icon-copy"></i> Copiar</button></div>`;
+ if(type === 'Jogos educativos') extra=`<div class="slide-actions"><button class="primary" onclick="startGeneratedGame()"><i class="icon icon-play"></i> Jogar agora</button><button class="ghost" onclick="printMaterial()"><i class="icon icon-printer"></i> Imprimir regras</button></div><div id="game-area"></div>`;
+ if(type === 'Assistente IA') extra=`<div class="assistant-box"><div class="ai-badge">IA local gratuita • ${localAIMode}</div><div id="assistant-chat" class="assistant-chat"><div class="chat-bubble bot">${esc(material)}</div></div><div class="chat-compose"><input id="assistant-input" placeholder="Faça outra pergunta para a IA…"><button class="primary" onclick="askAssistant()"><i class="icon icon-send"></i></button></div></div>`;
+ if(type === 'Comunicação') extra=`<div class="slide-actions"><button class="primary" onclick="copyText(${JSON.stringify(material)})"><i class="icon icon-copy"></i> Copiar mensagem</button><button class="ghost" onclick="openWhatsAppMessage(${JSON.stringify(material)})"><i class="icon icon-message-circle"></i> Abrir WhatsApp</button></div>`;
+ const visual=renderMaterialVisual(type,grade,sub,prompt,material);
+ out.innerHTML=`<div class="panel material-panel"><div class="result-head"><div><div class="eyebrow">${usedAI?'IA PLANEJAEDU':'MATERIAL ESTRUTURADO'}</div><h2>${esc(type)}</h2></div><button class="ghost" onclick="copyText(${JSON.stringify(material)})"><i class="icon icon-copy"></i> Copiar</button></div>${extra}${visual}<details class="raw-details"><summary>Ver texto completo gerado pela IA</summary><div class="output">${esc(material)}</div></details></div>`;
+}
+
+async function askAssistant(){
+ const input=$('#assistant-input'); if(!input)return; const q=input.value.trim(); if(!q)return;
+ const chat=$('#assistant-chat'); chat.innerHTML+=`<div class="chat-bubble user">${esc(q)}</div><div class="chat-bubble bot">Pensando…</div>`; input.value='';
+ try{ const answer=await generateWithAI({type:'Assistente IA',grade:$('#gen-grade')?.value||'não informado',sub:$('#gen-subject')?.value||'pedagogia',prompt:q,shift:$('#gen-shift')?.value||'não informado',header:'PlanejaEdu',conversation:true}); chat.lastElementChild.textContent=answer; }
+ catch(e){ chat.lastElementChild.textContent='Não consegui carregar a IA local neste navegador. Clique em “Carregar IA” e tente novamente.'; }
+ chat.scrollTop=chat.scrollHeight;
+}
+
+function renderMaterialVisual(type,grade,sub,prompt,material){
+ if(type==='Mapa mental'){
+   return `<div class="mindmap"><div class="mind-center">${esc(prompt)}</div><div class="mind-node n1"><b>Conceito</b><span>Definição e ideia central</span></div><div class="mind-node n2"><b>Características</b><span>Elementos importantes</span></div><div class="mind-node n3"><b>Exemplos</b><span>Aplicações no cotidiano</span></div><div class="mind-node n4"><b>Vocabulário</b><span>Palavras-chave</span></div><div class="mind-node n5"><b>Desafio</b><span>Como verificar a aprendizagem</span></div></div>`;
+ }
+ if(type==='Ideias de atividades'){
+   const cards=[['Aquecimento','Pergunta-relâmpago e levantamento de hipóteses.'],['Mão na massa','Produção em duplas usando materiais simples.'],['Estação','Quatro estações com desafios diferentes.'],['Jogo rápido','Cartas de perguntas e respostas.'],['Investigação','Observar, registrar, comparar e concluir.'],['Fechamento','Bilhete de saída em 3 minutos.']];
+   return `<div class="idea-grid">${cards.map(c=>`<article class="idea-card"><i class="icon icon-lightbulb"></i><h3>${c[0]}</h3><p>${esc(c[1])}</p></article>`).join('')}</div>`;
+ }
+ if(type==='Projeto') return `<div class="project-board"><div class="project-step"><b>1. Pergunta norteadora</b><span>Como o tema <strong>${esc(prompt)}</strong> aparece em nossa comunidade?</span></div><div class="project-step"><b>2. Investigação</b><span>Pesquisa, entrevistas, observação e coleta de dados.</span></div><div class="project-step"><b>3. Produção</b><span>Grupo cria cartaz, maquete, vídeo, relatório ou apresentação.</span></div><div class="project-step"><b>4. Socialização</b><span>Apresentação para a turma e registro das descobertas.</span></div><div class="project-step"><b>5. Avaliação</b><span>Rubrica com pesquisa, colaboração, conteúdo e comunicação.</span></div></div>`;
+ if(type==='Adaptação') return `<div class="adapt-grid"><article><i class="icon icon-eye"></i><h3>Acesso visual</h3><p>Fonte ampliada, alto contraste, menos informações por bloco e imagens com função pedagógica.</p></article><article><i class="icon icon-volume-2"></i><h3>Acesso auditivo</h3><p>Leitura das instruções, comandos curtos e possibilidade de resposta oral.</p></article><article><i class="icon icon-hand"></i><h3>Ação e registro</h3><p>Materiais concretos, respostas por seleção, recorte, pareamento ou produção guiada.</p></article><article><i class="icon icon-clock-3"></i><h3>Tempo e apoio</h3><p>Divida a tarefa em etapas e permita tempo adicional quando necessário.</p></article></div>`;
+ if(type==='Resumo') return `<div class="summary-card"><div class="summary-title">${esc(prompt)}</div><div class="summary-columns"><div><b>O essencial</b><p>Definição, características e relações que o estudante precisa dominar.</p></div><div><b>Exemplo</b><p>Uma situação concreta para ligar o conteúdo à realidade da turma.</p></div><div><b>Para lembrar</b><p>Três palavras-chave e uma frase de síntese para revisão.</p></div></div><button class="ghost" onclick="copyText(${JSON.stringify(material)})">Copiar resumo</button></div>`;
+ if(type==='Prova e avaliação') return `<div class="assessment-sheet"><div class="student-fields"><span>Nome: __________________________________</span><span>Data: ____/____/______</span></div><h3>Questões</h3><ol><li>Explique com suas palavras o que é <b>${esc(prompt)}</b>.</li><li>Marque a alternativa correta sobre o conteúdo estudado.</li><li>Relacione o conceito a uma situação do cotidiano.</li><li>Resolva uma situação-problema e mostre seu raciocínio.</li><li>Escreva um exemplo próprio.</li></ol><div id="answer-key" class="answer-key"><b>Gabarito orientador</b><p>1. Resposta conceitualmente correta. 2. Conforme o conteúdo trabalhado. 3. Relação adequada. 4. Estratégia coerente. 5. Exemplo pertinente.</p></div></div>`;
+ if(type==='Lista de exercícios') return `<div class="exercise-sheet"><h3>${esc(prompt)}</h3><ol><li>Defina o conceito com suas palavras.</li><li>Resolva uma questão direta sobre o tema.</li><li>Compare dois exemplos e registre uma diferença.</li><li>Resolva uma situação-problema.</li><li>Crie um exemplo próprio.</li><li>Desafio: explique como ensinaria esse conteúdo a um colega.</li></ol></div>`;
+ if(type==='Jogos educativos') return `<div class="game-card"><h3>Desafio: ${esc(prompt)}</h3><p>Responda 5 perguntas. Você ganha pontos pela resposta correta e pela velocidade.</p><div class="game-rules"><span>5 rodadas</span><span>10 pontos por acerto</span><span>Desempate por tempo</span></div></div>`;
+ if(type==='Comunicação') return `<div class="message-preview"><div class="message-header"><i class="icon icon-message-circle"></i> Prévia para a família</div><div class="message-body">${esc(material)}</div></div>`;
+ if(type==='Plano de aula') return `<div class="lesson-board"><div><b>Objetivo</b><p>Compreender e aplicar <strong>${esc(prompt)}</strong>.</p></div><div><b>Sequência</b><p>Acolhida → explicação dialogada → atividade prática → socialização → avaliação.</p></div><div><b>Evidência de aprendizagem</b><p>Registro, produção, resolução ou explicação oral do estudante.</p></div></div>`;
+ return `<div class="output">${esc(material)}</div>`;
+}
+
+function toggleAnswerKey(){const e=$("#answer-key");if(e)e.classList.toggle('hidden')}
+function printMaterial(){window.print()}
+function openWhatsAppMessage(t){window.open('https://wa.me/?text='+encodeURIComponent(t),'_blank')}
+function startGeneratedGame(){const area=$("#game-area");if(!area)return;const qs=["Qual é a ideia principal do tema?","Qual exemplo representa melhor o conteúdo?","Qual palavra-chave está ligada ao tema?","Como você explicaria isso para um colega?","Qual situação do cotidiano se relaciona ao tema?"];let i=0,score=0;const render=()=>{if(i>=qs.length){area.innerHTML=`<div class="game-result"><h3>Fim do desafio!</h3><p>Você fez <b>${score}</b> pontos.</p><button class="primary" onclick="startGeneratedGame()">Jogar novamente</button></div>`;return}area.innerHTML=`<div class="game-live"><span>Rodada ${i+1}/5</span><h3>${qs[i]}</h3><div class="game-options">${['Resposta A','Resposta B','Resposta C','Resposta D'].map((x,j)=>`<button class="tool-btn" onclick="gameAnswer(${j})">${x}</button>`).join('')}</div></div>`;window.gameAnswer=(j)=>{if(j===0)score+=10;i++;render()}};render()}
+function askAssistant(){const input=$("#assistant-input"),chat=$("#assistant-chat");if(!input||!input.value.trim())return;const q=input.value.trim();chat.innerHTML+=`<div class="chat-bubble user">${esc(q)}</div>`;let a=`Para ${esc(q)}, experimente começar pelos conhecimentos prévios, apresentar um exemplo concreto, propor uma atividade ativa e fechar com uma evidência de aprendizagem. Se você me disser ano, disciplina e tempo disponível, consigo estruturar uma sequência mais específica.`;if(/avalia|prova|quest/i.test(q))a='Para uma avaliação, combine questões objetivas e abertas, inclua pelo menos uma situação-problema e defina antes o que será considerado evidência de aprendizagem.';if(/inclus|adapta|autis|tdah|baixa visão/i.test(q))a='Para adaptar uma atividade, reduza a carga visual, divida instruções em etapas, ofereça diferentes formas de resposta e mantenha o objetivo pedagógico principal.';chat.innerHTML+=`<div class="chat-bubble bot">${a}</div>`;input.value='';chat.scrollTop=chat.scrollHeight}
+
+
+const slideImages = {
+ classroom: "https://images.unsplash.com/photo-1509062522246-3755977927d7?auto=format&fit=crop&w=1600&q=85",
+ science: "https://images.unsplash.com/photo-1532094349884-543bc11b234d?auto=format&fit=crop&w=1600&q=85",
+ books: "https://images.unsplash.com/photo-1497633762265-9d179a990aa6?auto=format&fit=crop&w=1600&q=85",
+ nature: "https://images.unsplash.com/photo-1441974231531-c6227db76b6e?auto=format&fit=crop&w=1600&q=85",
+ technology: "https://images.unsplash.com/photo-1518770660439-4636190af475?auto=format&fit=crop&w=1600&q=85",
+ art: "https://images.unsplash.com/photo-1549490349-8643362247b5?auto=format&fit=crop&w=1600&q=85",
+ children: "https://images.unsplash.com/photo-1503676260728-1c00da094a0b?auto=format&fit=crop&w=1600&q=85",
+ math: "https://images.unsplash.com/photo-1509228468518-180dd4864904?auto=format&fit=crop&w=1600&q=85"
+};
+function pickSlideImages(subject, prompt){
+  const t=(subject+" "+prompt).toLowerCase(); let primary=slideImages.classroom;
+  if(/ciên|biolog|quím|físic|experi|laborat/.test(t)) primary=slideImages.science;
+  else if(/matem|fraç|númer|geometr|cálcul/.test(t)) primary=slideImages.math;
+  else if(/arte|desen|pint|música/.test(t)) primary=slideImages.art;
+  else if(/tecnolog|informát|comput/.test(t)) primary=slideImages.technology;
+  else if(/nature|ambient|cadeia alimentar|animais|plantas|floresta|água/.test(t)) primary=slideImages.nature;
+  else if(/liter|portugu|leitura|livro|texto/.test(t)) primary=slideImages.books;
+  return [primary,slideImages.classroom,slideImages.books,slideImages.children,primary,slideImages.nature,slideImages.classroom,slideImages.books];
+}
+function makeSlideDeck(prompt,grade,subject,shift,header){
+  const imgs=pickSlideImages(subject,prompt), title=prompt||"Tema da aula";
+  return [
+    {title,kicker:"PLANEJAEDU • APRESENTAÇÃO",body:`${grade} • ${subject} • ${shift}`,image:imgs[0]},
+    {title:"Objetivos de aprendizagem",kicker:"01 • O QUE VAMOS APRENDER",body:`• Compreender os conceitos principais de ${title}.\n• Relacionar o conteúdo ao cotidiano.\n• Participar de atividades e explicar o que foi aprendido.`,image:imgs[1]},
+    {title:"Ativação do conhecimento",kicker:"02 • VAMOS COMEÇAR",body:`Pergunta disparadora:\nO que você já sabe sobre ${title}?\n\nConverse em duplas e registre uma hipótese.`,image:imgs[2]},
+    {title:"Conceito principal",kicker:"03 • EXPLICAÇÃO",body:`Apresente ${title} em partes curtas, usando exemplos concretos, palavras-chave e perguntas para a turma.`,image:imgs[3]},
+    {title:"Exemplo prático",kicker:"04 • OBSERVE E PENSE",body:`Mostre uma situação real relacionada a ${title}. Peça que os estudantes identifiquem o que está acontecendo e justifiquem suas respostas.`,image:imgs[4]},
+    {title:"Desafio da turma",kicker:"05 • MÃO NA MASSA",body:`Em duplas ou grupos, resolvam uma tarefa relacionada a ${title}. Cada grupo deve explicar sua estratégia.`,image:imgs[5]},
+    {title:"Sistematização",kicker:"06 • O QUE FICA",body:`Palavras-chave\n• conceito\n• características\n• exemplos\n• aplicação\n\nPeça uma frase-síntese para fechar a aula.`,image:imgs[6]},
+    {title:"Avaliação e fechamento",kicker:"07 • SAÍDA",body:`Bilhete de saída: escreva uma coisa que aprendeu sobre ${title} e uma pergunta que ainda ficou.\n\nCabeçalho: ${header}`,image:imgs[7]}
+  ];
+}
+function openSlideDeck(prompt,grade,subject,shift,header){
+  const slides=makeSlideDeck(prompt,grade,subject,shift,header); let modal=document.getElementById('slide-modal');
+  if(!modal){ modal=document.createElement('div'); modal.id='slide-modal'; modal.className='modal'; document.body.appendChild(modal); }
+  let idx=0;
+  const render=()=>{const sl=slides[idx]; modal.innerHTML=`<div class="slide-modal-card"><button class="close" onclick="document.getElementById('slide-modal').classList.add('hidden')">×</button><div class="slide-deck-head"><b>Apresentação pronta</b><span>${idx+1} / ${slides.length}</span></div><div class="slide-canvas"><img src="${sl.image}" alt="Imagem educativa para ${esc(sl.title)}"><div class="slide-overlay"></div><div class="slide-content"><div class="slide-kicker">${esc(sl.kicker)}</div><h2>${esc(sl.title)}</h2><p>${esc(sl.body)}</p></div></div><div class="slide-nav"><button class="ghost" ${idx===0?'disabled':''} onclick="slidePrev()">Anterior</button><button class="primary" ${idx===slides.length-1?'disabled':''} onclick="slideNext()">Próximo</button><button class="ghost" onclick="downloadPptx(${JSON.stringify(prompt)},${JSON.stringify(grade)},${JSON.stringify(subject)},${JSON.stringify(shift)},${JSON.stringify(header)})"><i class="icon icon-download"></i> Baixar .pptx</button></div><small class="slide-credit">Imagens ilustrativas: banco de imagens Unsplash. Você pode substituir as imagens no PowerPoint.</small></div>`; modal.classList.remove('hidden'); window.slidePrev=()=>{if(idx>0){idx--;render()}}; window.slideNext=()=>{if(idx<slides.length-1){idx++;render()}};}; render();
+}
+async function imageToData(url){try{const r=await fetch(url,{mode:'cors'});const b=await r.blob();return await new Promise((res,rej)=>{const fr=new FileReader();fr.onload=()=>res(fr.result);fr.onerror=rej;fr.readAsDataURL(b)});}catch(e){return null;}}
+async function ensurePptx(){
+  if(window.pptxgen) return true;
+  return new Promise((resolve,reject)=>{
+    const s=document.createElement('script');
+    s.src='https://cdn.jsdelivr.net/npm/pptxgenjs@3.12.0/dist/pptxgen.bundle.js';
+    s.onload=()=>resolve(true); s.onerror=()=>reject(new Error('Não foi possível carregar o gerador de PowerPoint.'));
+    document.head.appendChild(s);
+  });
+}
+async function downloadPptx(prompt,grade,subject,shift,header){
+  try{await ensurePptx();}catch(e){toast(e.message);return}
+  if(typeof pptxgen==='undefined'){toast('Gerador de PowerPoint indisponível.');return}
+  toast('Montando o PowerPoint com imagens...'); const slides=makeSlideDeck(prompt,grade,subject,shift,header), pptx=new pptxgen(); pptx.layout='LAYOUT_WIDE'; pptx.author='PlanejaEdu'; pptx.subject='Apresentação pedagógica'; pptx.title=prompt||'Apresentação PlanejaEdu';
+  for(const sl of slides){const ps=pptx.addSlide();ps.background={color:'F7F7FF'};const dataUri=await imageToData(sl.image);if(dataUri)ps.addImage({data:dataUri,x:7.0,y:0,w:6.33,h:7.5});ps.addShape(pptx.ShapeType.rect,{x:0,y:0,w:7.2,h:7.5,fill:{color:'F7F7FF'},line:{color:'F7F7FF'}});ps.addText(sl.kicker,{x:.6,y:.65,w:5.7,h:.3,fontFace:'Aptos',fontSize:10,bold:true,charSpacing:2.5,color:'6046F5'});ps.addText(sl.title,{x:.6,y:1.25,w:5.9,h:1.15,fontFace:'Aptos Display',fontSize:28,bold:true,color:'0E1C4A',margin:0,fit:'shrink'});ps.addText(sl.body,{x:.6,y:2.75,w:5.7,h:3.2,fontFace:'Aptos',fontSize:18,color:'31446E',fit:'shrink',valign:'mid',margin:.05});ps.addText('PlanejaEdu • gratuito',{x:.6,y:7.05,w:3,h:.25,fontFace:'Aptos',fontSize:9,color:'7282A3'});}
+  await pptx.writeFile({fileName:'PlanejaEdu_Apresentacao.pptx'}); toast('PowerPoint criado com sucesso!');
+}
+
+function buildMaterial(type,grade,sub,prompt,shift,h){
+ const common=`Cabeçalho: ${h}\nAno/série: ${grade}\nDisciplina: ${sub}\nTurno: ${shift}\nTema: ${prompt}`;
+ if(type==="Plano de aula") return `${h}\n\nPLANO DE AULA\n\n${common}\n\nOBJETIVOS\n1. Compreender ${prompt}.\n2. Aplicar o conteúdo em uma situação concreta.\n3. Explicar o que foi aprendido usando registro oral ou escrito.\n\nHABILIDADES / EVIDÊNCIAS\n• Identifica o conceito principal.\n• Resolve ou produz algo relacionado ao tema.\n• Justifica sua resposta.\n\nDURAÇÃO\n50 minutos (ajuste conforme a rotina).\n\nSEQUÊNCIA DIDÁTICA\n1. Acolhida — apresente uma pergunta disparadora.\n2. Conhecimentos prévios — registre hipóteses da turma.\n3. Desenvolvimento — explique ${prompt} com exemplos.\n4. Prática — proponha uma tarefa individual ou em dupla.\n5. Socialização — compare estratégias e respostas.\n6. Fechamento — peça uma frase-síntese.\n\nRECURSOS\nQuadro, caderno, imagens, materiais concretos e recursos digitais disponíveis.\n\nAVALIAÇÃO\nObserve participação, compreensão, estratégia utilizada e capacidade de explicar o conteúdo.\n\nINCLUSÃO\nOfereça instruções em etapas, apoio visual e diferentes formas de resposta.`;
+ if(type==="Slides") return `${h}\n\nAPRESENTAÇÃO\n\n${common}\n\n8 slides prontos com imagens, objetivos, ativação, explicação, exemplo, desafio, síntese e avaliação. Use “Visualizar apresentação” para abrir a versão visual.`;
+ if(type==="Prova e avaliação") return `${h}\n\nAVALIAÇÃO — ${prompt}\n\n${common}\n\nNome: ____________________________________    Data: ____/____/______\n\n1. Explique com suas palavras o conceito de ${prompt}.\n\n2. Marque a alternativa que representa corretamente o conteúdo trabalhado.\nA) Uma afirmação que contradiz o conceito.\nB) Uma aplicação correta do conceito.\nC) Um exemplo que não pertence ao tema.\nD) Uma informação sem relação.\n\n3. Relacione ${prompt} a uma situação do cotidiano.\n\n4. Resolva a situação-problema apresentada pelo professor e registre seu raciocínio.\n\n5. Crie um exemplo próprio e explique por que ele se relaciona ao tema.\n\nGABARITO ORIENTADOR\n1. Deve apresentar a ideia central.\n2. Alternativa B.\n3. Relação coerente com o conteúdo.\n4. Estratégia e conclusão coerentes.\n5. Exemplo pertinente e explicado.\n\nCRITÉRIOS\nCompreensão • aplicação • argumentação • registro.`;
+ if(type==="Lista de exercícios") return `${h}\n\nLISTA DE EXERCÍCIOS — ${prompt}\n\n${common}\n\n1. Defina ${prompt} com suas palavras.\n2. Resolva uma questão direta sobre o conceito.\n3. Compare dois exemplos e escreva uma diferença.\n4. Resolva uma situação-problema relacionada ao cotidiano.\n5. Complete uma tabela com conceito, exemplo e aplicação.\n6. Crie um exemplo próprio.\n7. DESAFIO: explique o conteúdo para um colega usando no máximo 3 frases.\n\nGABARITO / ORIENTAÇÃO\nAs respostas devem demonstrar compreensão do conceito e justificar a estratégia utilizada.`;
+ if(type==="Mapa mental") return `${h}\n\nMAPA MENTAL — ${prompt}\n\nCENTRO\n${prompt}\n\nRAMO 1 — CONCEITO\nDefinição • ideia central • para que serve\n\nRAMO 2 — CARACTERÍSTICAS\nElementos • propriedades • relações\n\nRAMO 3 — EXEMPLOS\nSituações reais • exemplos da turma • aplicações\n\nRAMO 4 — VOCABULÁRIO\nPalavras-chave que precisam ser lembradas\n\nRAMO 5 — DESAFIO\nUma pergunta que exija aplicação do conteúdo.`;
+ if(type==="Jogos educativos") return `${h}\n\nJOGO EDUCATIVO — DESAFIO ${prompt.toUpperCase()}\n\n${common}\n\nOBJETIVO\nReforçar o conteúdo por meio de perguntas, decisões e pontuação.\n\nMATERIAIS\nCartas com perguntas, quadro para pontuação e cronômetro opcional.\n\nCOMO JOGAR\n1. Organize duplas ou equipes.\n2. Faça uma pergunta por rodada.\n3. Resposta correta = 10 pontos.\n4. Justificativa correta = +5 pontos.\n5. Rodada final vale o dobro.\n\nVITÓRIA\nVence a equipe com maior pontuação, mas todos devem registrar o que aprenderam no fechamento.`;
+ if(type==="Projeto") return `${h}\n\nPROJETO INTERDISCIPLINAR — ${prompt}\n\n${common}\n\nPERGUNTA NORTEADORA\nComo ${prompt} se relaciona com nossa escola, comunidade ou cotidiano?\n\nETAPA 1 — INVESTIGAÇÃO\nLevantamento de hipóteses, pesquisa e coleta de informações.\n\nETAPA 2 — ANÁLISE\nOrganização dos dados, comparação de fontes e discussão em grupo.\n\nETAPA 3 — PRODUÇÃO\nEscolha um produto: cartaz, maquete, vídeo, podcast, relatório ou apresentação.\n\nETAPA 4 — SOCIALIZAÇÃO\nApresentação para a turma ou comunidade escolar.\n\nETAPA 5 — AVALIAÇÃO\nRubrica: conteúdo 40% • processo 20% • colaboração 20% • comunicação 20%.`;
+ if(type==="Adaptação") return `${h}\n\nADAPTAÇÃO PEDAGÓGICA — ${prompt}\n\n${common}\n\nOBJETIVO MANTIDO\nPreservar a aprendizagem essencial de ${prompt}.\n\nACESSO VISUAL\nFonte ampliada, alto contraste, menos elementos por bloco e imagens com função pedagógica.\n\nINSTRUÇÕES\nUma orientação por vez, frases curtas, modelo resolvido e checagem de compreensão.\n\nRESPOSTA\nPermitir marcar, apontar, falar, desenhar ou escrever, conforme a necessidade.\n\nTEMPO\nDividir a tarefa em etapas e permitir tempo adicional quando necessário.\n\nAVALIAÇÃO\nAvaliar o objetivo pedagógico, não apenas a forma de registro.`;
+ if(type==="Comunicação") return `Olá, famílias!\n\nNesta semana, a turma de ${grade} irá trabalhar ${prompt} na disciplina de ${sub}.\n\nNosso objetivo é ampliar a compreensão do conteúdo por meio de atividades práticas e momentos de participação.\n\nPedimos que, se possível, conversem com a criança sobre o que ela aprendeu e valorizem suas descobertas.\n\nAtenciosamente,\nProfessora\n${h}`;
+ if(type==="Ideias de atividades") return `${h}\n\nIDEIAS DE ATIVIDADES — ${prompt}\n\n1. PERGUNTA-RELÂMPAGO\nComece com uma pergunta e registre respostas sem corrigir imediatamente.\n\n2. ESTAÇÕES DE APRENDIZAGEM\nMonte 4 estações: observar, resolver, produzir e explicar.\n\n3. INVESTIGAÇÃO\nApresente um problema e peça hipóteses antes da explicação.\n\n4. MÃO NA MASSA\nTransforme ${prompt} em uma produção concreta.\n\n5. JOGO DE CARTAS\nCrie cartas com conceitos, exemplos e desafios para formar pares.\n\n6. BILHETE DE SAÍDA\nAntes de sair, cada estudante escreve uma descoberta e uma dúvida.`;
+ if(type==="Resumo") return `${h}\n\nRESUMO DIDÁTICO — ${prompt}\n\n${common}\n\nIDEIA CENTRAL\n${prompt} deve ser compreendido a partir de seu conceito, características e aplicações.\n\nPONTOS-CHAVE\n• conceito principal\n• características\n• exemplos\n• aplicação\n\nREVISÃO RÁPIDA\nPeça que o estudante explique o tema em 3 frases e dê um exemplo próprio.\n\nPALAVRAS-CHAVE\n${sub} • ${prompt} • conceito • aplicação`;
+ if(type==="Assistente IA") return `ASSISTENTE PEDAGÓGICO LOCAL\n\nContexto recebido:\nAno/série: ${grade}\nDisciplina: ${sub}\nTema: ${prompt}\n\nSugestão inicial:\nComece pelos conhecimentos prévios, apresente um exemplo concreto, proponha uma atividade ativa e finalize com uma evidência de aprendizagem. Use a caixa de conversa abaixo para fazer perguntas e receber sugestões contextualizadas.`;
+ return `${h}\n\n${type.toUpperCase()}\n\n${common}\n\nMaterial estruturado especificamente para ${type.toLowerCase()}, com foco em ${prompt}.`;
+}
+function esc(s){return s.replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[m]))}
+function copyText(t){navigator.clipboard?.writeText(t);toast("Copiado!")}
+function classesPage(){return pageHead("Turmas","Cadastre turmas, turno e vincule alunos.",`<button class="primary" onclick="addClass()">+ Nova turma</button>`)+`<div class="panel"><div class="list">${data.classes.length?data.classes.map((c,i)=>`<div class="row"><div><b>${c.name}</b><small class="sub"><br>${c.segment} • ${c.shift} • ${c.school||"Escola não definida"}</small></div><span class="pill">${data.students.filter(s=>s.classId===i).length} alunos</span></div>`).join(""):`<p class="sub">Nenhuma turma cadastrada ainda.</p>`}</div></div>`}
+function addClass(){const n=prompt("Nome da turma (ex.: 4º ano A):");if(!n)return;const seg=prompt("Segmento (Educação Infantil, Ensino Fundamental ou Ensino Médio):","Ensino Fundamental");const shift=prompt("Turno:","Matutino");const school=prompt("Escola:","Escola Municipal");data.classes.push({name:n,segment:seg,shift,school});save();render("classes");toast("Turma adicionada")}
+function studentsPage(){return pageHead("Alunos","Cadastre os estudantes para usar a chamada automática.",`<button class="primary" onclick="addStudent()">+ Novo aluno</button>`)+`<div class="panel"><div class="list">${data.students.length?data.students.map(s=>`<div class="row"><div><b>${s.name}</b><small class="sub"><br>${data.classes[s.classId]?.name||"Turma não encontrada"}</small></div><i class="icon icon-user-round"></i></div>`).join(""):`<p class="sub">Cadastre os alunos individualmente ou use a opção de enviar uma lista pelo WhatsApp.</p>`}</div></div>`}
+function addStudent(){if(!data.classes.length){toast("Crie uma turma primeiro.");return}const n=prompt("Nome completo do aluno:");if(!n)return;const opts=data.classes.map((c,i)=>`${i}: ${c.name}`).join("\\n");const id=Number(prompt("Digite o número da turma:\\n"+opts,"0"));data.students.push({name:n,classId:isNaN(id)?0:id});save();render("students")}
+function attendancePage(){return pageHead("Chamada automática","A lista é montada a partir dos alunos cadastrados.")+`<div class="panel"><div class="field"><label>Turma</label><select id="att-class" onchange="renderAttendance()">${data.classes.map((c,i)=>`<option value="${i}">${c.name} — ${c.shift}</option>`).join("")}</select></div><div id="att-list"></div></div>`}
+function renderAttendance(){const id=Number($("#att-class").value);const st=data.students.filter(s=>s.classId===id);$("#att-list").innerHTML=st.length?`<div class="list">${st.map(s=>`<label class="check"><input type="checkbox" checked> ${s.name}</label>`).join("")}</div><br><button class="primary" onclick="toast('Chamada salva localmente!')">Salvar chamada</button>`:`<p class="sub">Não há alunos nesta turma. Cadastre os nomes na aba Alunos.</p>`}
+function calendarPage(){
+ const now=new Date(), ym=calendarState.ym||`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}`;
+ const [y,m]=ym.split("-").map(Number);
+ return pageHead("Calendário","Monte e altere sua rotina do jeito que preferir.",`<div class="calendar-actions"><button class="ghost" onclick="changeMonth(-1)"><i class="icon icon-chevron-left"></i></button><b>${new Date(y,m-1,1).toLocaleDateString("pt-BR",{month:"long",year:"numeric"})}</b><button class="ghost" onclick="changeMonth(1)"><i class="icon icon-chevron-right"></i></button><button class="primary" onclick="openEventForm()">+ Novo evento</button></div>`)+
+ `<div class="panel calendar-panel"><div class="calendar-week">${["Dom","Seg","Ter","Qua","Qui","Sex","Sáb"].map(d=>`<div>${d}</div>`).join("")}</div><div class="calendar-grid">${calendarCells(y,m)}</div></div><div class="panel"><h2>Próximos eventos</h2><div id="event-list">${eventList()}</div></div>`;
+}
+let calendarState={ym:null};
+function calendarCells(y,m){const first=new Date(y,m-1,1).getDay(),days=new Date(y,m,0).getDate(),cells=[];for(let i=0;i<first;i++)cells.push(`<div class="day empty"></div>`);for(let d=1;d<=days;d++){const iso=`${y}-${String(m).padStart(2,"0")}-${String(d).padStart(2,"0")}`;const ev=events().filter(e=>e.d===iso);cells.push(`<div class="day" onclick="openEventForm('${iso}')"><div class="day-num">${d}</div>${ev.map(e=>`<button class="event-chip" onclick="event.stopPropagation();editEvent('${e.id}')">${esc(e.n)}</button>`).join("")}<button class="day-add" onclick="event.stopPropagation();openEventForm('${iso}')">+</button></div>`)}return cells.join("")}
+function events(){return JSON.parse(localStorage.getItem("pe_events")||"[]")}
+function saveEvents(a){localStorage.setItem("pe_events",JSON.stringify(a));}
+function changeMonth(delta){const [y,m]=(calendarState.ym||`${new Date().getFullYear()}-${String(new Date().getMonth()+1).padStart(2,"0")}`).split("-").map(Number);const d=new Date(y,m-1+delta,1);calendarState.ym=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;render("calendar")}
+function openEventForm(date=""){const name=prompt("Nome da aula, avaliação ou evento:","");if(!name)return;const d=date||prompt("Data (AAAA-MM-DD):",new Date().toISOString().slice(0,10));if(!d)return;const shift=prompt("Turno:","Matutino");const arr=events();arr.push({id:Date.now().toString(),d,n:name,shift:shift||"Matutino"});saveEvents(arr);render("calendar");toast("Evento adicionado")}
+function editEvent(id){const arr=events(),e=arr.find(x=>x.id===id);if(!e)return;const action=prompt(`Editar evento:\n\n${e.n}\n${e.d}\n\nDigite: 1 para renomear, 2 para mudar data, 3 para excluir`,`1`);if(action==="1"){const n=prompt("Novo nome:",e.n);if(n)e.n=n}else if(action==="2"){const d=prompt("Nova data (AAAA-MM-DD):",e.d);if(d)e.d=d}else if(action==="3"){if(!confirm("Excluir este evento?"))return;arr.splice(arr.indexOf(e),1)}saveEvents(arr);render("calendar");toast("Calendário atualizado")}
+function eventList(){const a=events().sort((x,y)=>x.d.localeCompare(y.d));return a.length?`<div class="list">${a.map(e=>`<div class="row"><div><b>${esc(e.n)}</b><small class="sub"><br>${new Date(e.d+"T12:00").toLocaleDateString("pt-BR")} • ${esc(e.shift||"Matutino")}</small></div><button class="ghost" onclick="editEvent('${e.id}')">Editar</button></div>`).join("")}</div>`:`<p class="sub">Seu calendário está livre. Clique em um dia ou em “Novo evento” para começar.</p>`}
+function headersPage(){return pageHead("Cabeçalhos","Escolha um ou mais cabeçalhos para seus planos.")+`<div class="panel"><p class="sub">Você pode marcar vários. O cabeçalho escolhido aparece no material gerado.</p>${data.headers.map((h,i)=>`<label class="header-card"><span><b>${h.name}</b><small class="sub"><br>${h.desc}</small></span><input type="checkbox" ${i===0?"checked":""} onchange="toast(this.checked?'Cabeçalho selecionado':'Cabeçalho retirado')"></label>`).join("")}</div>`}
+function libraryPage(){return pageHead("Biblioteca","Materiais criados neste dispositivo.")+`<div class="panel"><div class="list">${data.materials.length?data.materials.slice().reverse().map(m=>`<div class="row"><div><b>${m.title}</b><small class="sub"><br>${m.type} • ${m.date}</small></div><button class="ghost" onclick="openGenerator('${m.type}')">Abrir</button></div>`).join(""):`<p class="sub">Sua biblioteca está vazia.</p>`}</div></div>`}
+function settingsPage(){return pageHead("Configurações","Personalize seu espaço pedagógico.")+`<div class="panel"><h2>Perfil</h2><div class="grid2"><div class="field"><label>Nome</label><input id="set-name" value="${esc(data.user||"Professora")}"></div><div class="field"><label>Foto</label><input id="set-photo" type="file" accept="image/*" onchange="photoPreview(this)"></div></div><button class="primary" onclick="saveSettings()">Salvar perfil</button></div><div class="panel"><h2>Aparência</h2><p class="sub">Modo escuro para usar o site com mais conforto.</p><button class="primary" onclick="toggleTheme()">Alternar modo escuro</button></div><div class="panel"><h2>Contribuição</h2><p class="sub">O projeto não tem plano pago. Se quiser contribuir, use o Pix da criadora.</p><button class="primary" onclick="pixModal()">Ver Pix</button></div>`}
+function saveSettings(){data.user=$("#set-name").value||"Professora";save();$("#user-name").textContent=data.user;$("#avatar").textContent=data.user[0].toUpperCase();toast("Perfil atualizado")}
+function photoPreview(input){if(input.files[0]){const r=new FileReader();r.onload=()=>{localStorage.setItem("pe_photo",r.result);toast("Foto carregada neste dispositivo")};r.readAsDataURL(input.files[0])}}
+function toggleTheme(){data.theme=data.theme==="dark"?"light":"dark";save();document.body.classList.toggle("dark",data.theme==="dark")}
+function createAccount(){const n=$("#signup-name").value,e=$("#signup-email").value,p=$("#signup-password").value;if(!n||!e||p.length<4){$("#signup-msg").textContent="Preencha nome, e-mail e uma senha com pelo menos 4 caracteres.";return}data.user=n;save();enter(n)}
+$$("[data-action]").forEach(b=>b.addEventListener("click",()=>{const a=b.dataset.action;if(a==="start")start();if(a==="login")login();if(a==="signup")show("signup");if(a==="create-account")createAccount();if(a==="do-login")enter($("#email").value.split("@")[0]||"Professora");if(a==="google")enter("Professora Google");if(a==="demo")enter("Professora (demonstração)");if(a==="logout")login();if(a==="close-pix")$("#pix-modal").classList.add("hidden");if(a==="copy-pix")copyText(PIX);if(a==="menu")$(".sidebar").classList.toggle("open")}));
+$$(".nav").forEach(n=>n.addEventListener("click",()=>{render(n.dataset.page);$(".sidebar").classList.remove("open");if(n.dataset.page==="attendance")setTimeout(renderAttendance,0)}));
+if(data.theme==="dark")document.body.classList.add("dark");
+if(data.user){$("#user-name").textContent=data.user;$("#avatar").textContent=data.user[0].toUpperCase()}
+show("landing");
+
+
+
+// Ícones SVG leves e consistentes em conteúdos renderizados dinamicamente.
+let iconPaintQueued=false;
+const iconObserver=new MutationObserver((mutations)=>{
+  const needs=mutations.some(m=>[...m.addedNodes].some(n=>n.nodeType===1 && (n.matches?.('i.icon') || n.querySelector?.('i.icon'))));
+  if(!needs || iconPaintQueued || !window.paintPlanejaIcons) return;
+  iconPaintQueued=true;
+  requestAnimationFrame(()=>{iconPaintQueued=false; window.paintPlanejaIcons();});
+});
+iconObserver.observe(document.body,{subtree:true,childList:true});
