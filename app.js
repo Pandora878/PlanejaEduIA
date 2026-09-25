@@ -83,7 +83,7 @@ async function generateWithAI({type,grade,sub,prompt,shift,header,conversation=f
    : `Tipo de material: ${type}\nAno/série: ${grade}\nDisciplina: ${sub}\nTurno: ${shift}\nCabeçalho: ${header}\nTema/pedido da professora: ${prompt}\n\nCrie agora o material completo. Para ${type}, inclua todos os elementos que normalmente seriam necessários para uso em sala de aula. Se for Slides, entregue 8 slides numerados com título, texto curto, atividade/visual sugerido e fala da professora. Se for Prova e avaliação, entregue questões variadas e gabarito. Se for Lista de exercícios, entregue exercícios graduados e gabarito. Se for Jogo educativo, crie regras, preparação, rodadas, perguntas e pontuação. Se for Mapa mental, organize uma estrutura hierárquica pronta para visualização. Se for Adaptação, adapte concretamente o material para necessidades educacionais diversas. Se for Comunicação, entregue uma mensagem pronta para enviar. Se for Assistente IA, responda diretamente à pergunta.`;
  const messages=[{role:'system',content:aiSystemPrompt(type)},{role:'user',content:userPrompt}];
  const out=await generator(messages,{max_new_tokens:700,temperature:0.65,do_sample:true,return_full_text:false});
- let text=Array.isArray(out)?out[0]?.generated_text:'' : out?.generated_text || '';
+ let text=Array.isArray(out) ? (out[0]?.generated_text || '') : (out?.generated_text || '');
  if(Array.isArray(text)) text=text[text.length-1]?.content || text.map(x=>x.content||'').join('\n');
  if(!text) throw new Error('A IA não retornou texto.');
  return String(text).trim();
@@ -109,7 +109,7 @@ function render(p){
   if(p==="home") html=pageHead("Visão geral","Seu espaço pedagógico gratuito.")+`<div class="cards">
   <div class="stat"><small>Turmas</small><br><b>${data.classes.length}</b></div><div class="stat"><small>Alunos</small><br><b>${data.students.length}</b></div>
   <div class="stat"><small>Materiais salvos</small><br><b>${data.materials.length}</b></div><div class="stat"><small>Professores ativos</small><br><b>1</b></div></div>
-  <div class="panel"><h2>Comece agora</h2><div class="tool-picker">${["Plano de aula","Slides","Prova e avaliação","Lista de exercícios","Mapa mental","Jogos educativos","Projeto","Adaptação","Comunicação","Ideias de atividades","Resumo","Assistente IA"].map((x,i)=>`<button class="tool-btn" onclick="openGenerator('${x}')"><i class="icon icon-sparkles"></i> ${x}</button>`).join("")}</div></div>`;
+  <div class="panel"><div class="section-heading"><div><span class="section-kicker">FERRAMENTAS</span><h2>Comece agora</h2></div><span class="section-count">12 recursos</span></div><div class="tool-picker">${[["Plano de aula","book-open-check"],["Slides","presentation"],["Prova e avaliação","clipboard-check"],["Lista de exercícios","list-checks"],["Mapa mental","brain"],["Jogos educativos","gamepad-2"],["Projeto","folder-kanban"],["Adaptação","accessibility"],["Comunicação","message-circle"],["Ideias de atividades","lightbulb"],["Resumo","file-text"],["Assistente IA","bot"]].map(([x,icon])=>`<button class="tool-btn" onclick="openGenerator('${x}')"><span class="tool-icon"><i class="icon icon-${icon}"></i></span><span class="tool-btn-copy"><strong>${x}</strong><small>${toolDescriptions[x]||'Crie materiais pedagógicos personalizados.'}</small></span><i class="icon icon-arrow-right tool-arrow"></i></button>`).join("")}</div></div>`;
   if(p==="planner") html=generator();
   if(p==="classes") html=classesPage();
   if(p==="students") html=studentsPage();
