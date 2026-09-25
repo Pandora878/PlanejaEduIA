@@ -46,9 +46,10 @@ button:active{transform:translateY(0)}
 /* Prevent costly visual work from affecting initial scrolling. */
 .tools-grid,.panel,.tool{content-visibility:auto;contain-intrinsic-size:180px}
 /* SVG icons replace the old icon-font look. */
-i.icon{display:inline-flex;align-items:center;justify-content:center;font-style:normal}.svg-icon{width:18px;height:18px;display:inline-block;vertical-align:middle;flex:none}
+i.icon{display:inline-flex;align-items:center;justify-content:center;font-style:normal}.icon svg{width:18px;height:18px;display:block}
 [data-lucide]{width:18px;height:18px;stroke:currentColor;display:inline-block;vertical-align:middle;flex:none}
 .slide-actions .primary,.slide-actions .ghost{display:inline-flex;align-items:center;gap:7px}.slide-actions svg{width:17px;height:17px}
 @media(max-width:1000px){.hero{grid-template-columns:1fr;gap:40px}.ai-preview{max-width:650px}.tools-grid{grid-template-columns:repeat(3,1fr)}}
 @media(max-width:760px){.hero{padding:48px 20px 45px}.hero h1{letter-spacing:-3px}.tools-grid{grid-template-columns:repeat(2,1fr);padding:0 20px 55px}.sidebar{width:280px}.page{padding:28px 20px 55px}}
 @media(max-width:520px){.hero h1{font-size:43px}.hero p{font-size:16px}.tools-grid{grid-template-columns:1fr}.topbar{padding:15px 20px}.auth-card{padding:28px 22px}.window-body{padding:22px}.window-head b{font-size:13px}}
+.ai-bar{display:flex;justify-content:space-between;align-items:center;gap:18px;padding:16px 18px;margin:18px 0;border:1px solid #ddd7ff;background:#faf9ff;border-radius:16px}.ai-bar .ghost{border:1px solid #dcd7ff;border-radius:12px;padding:11px 14px;background:#fff}.ai-status{display:block;font-size:13px;color:#6b6f8f;margin-top:5px;min-height:18px}.ai-status.loading{color:#5d43e8}.ai-status.ready{color:#138a5b;font-weight:700}.ai-status.error{color:#b42318}.ai-generating{display:flex;align-items:center;gap:14px;padding:30px}.spinner{width:28px;height:28px;border:3px solid #ddd7ff;border-top-color:#6246ea;border-radius:50%;animation:spin .8s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}

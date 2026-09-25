@@ -8,46 +8,66 @@ const defaultData={user:null,theme:"light",headers:[
 {name:"Integral (Lajeado Grande)",desc:"Cabeçalho de projeto",type:"Integral"}
 ],classes:[],students:[],materials:[]};
 
-// IA LOCAL GRATUITA: roda no navegador usando Transformers.js + Qwen2.5-0.5B-Instruct.
-// Não usa OpenAI, não exige chave e não envia o conteúdo da professora para um servidor de IA.
+// IA LOCAL GRATUITA: roda no navegador com Transformers.js + Qwen2.5-0.5B-Instruct.
+// Não usa OpenAI e não exige chave. O modelo é baixado uma vez e fica em cache do navegador.
 let localAI=null;
 let localAILoading=null;
 let localAIMode='WebGPU';
 
 async function loadLocalAI(statusElId='ai-status'){
   const status=document.getElementById(statusElId);
-  const setStatus=(msg,kind='')=>{if(status){status.textContent=msg;status.className='ai-status '+kind;}};
-  if(localAI) return localAI;
+  const setStatus=(msg,kind='')=>{
+    if(status){ status.textContent=msg; status.className='ai-status '+kind; }
+  };
+  if(localAI){ setStatus(`IA pronta no seu dispositivo (${localAIMode}).`,'ready'); return localAI; }
   if(localAILoading) return localAILoading;
+
   localAILoading=(async()=>{
-    setStatus('Baixando a IA gratuita para este navegador. Na primeira vez pode demorar alguns minutos…','loading');
     try{
-      const mod=await import('https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.8.1');
+      setStatus('Conectando ao motor gratuito da IA…','loading');
+      // +esm torna a importação do pacote mais confiável em hospedagem estática como Netlify.
+      const mod=await import('https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.8.1/+esm');
       const {pipeline,env}=mod;
       env.allowLocalModels=false;
+      env.useBrowserCache=true;
+
       const model='onnx-community/Qwen2.5-0.5B-Instruct';
-      if(navigator.gpu){
-        try{
-          localAIMode='WebGPU';
-          localAI=await pipeline('text-generation',model,{dtype:'q4',device:'webgpu'});
-        }catch(webgpuError){
-          console.warn('WebGPU indisponível; usando WASM.',webgpuError);
-          localAIMode='WASM';
-          localAI=await pipeline('text-generation',model,{dtype:'q4',device:'wasm'});
+      const webgpuAvailable=!!(navigator.gpu && await navigator.gpu.requestAdapter().catch(()=>null));
+      const device=webgpuAvailable?'webgpu':'wasm';
+      localAIMode=device==='webgpu'?'WebGPU':'WASM';
+      const dtype=device==='webgpu'?'q4f16':'q4';
+
+      setStatus(`Baixando a IA (${localAIMode})… 0%`,'loading');
+      localAI=await pipeline('text-generation',model,{
+        device,
+        dtype,
+        progress_callback:(progress)=>{
+          if(progress && typeof progress.progress==='number'){
+            const pct=Math.max(0,Math.min(100,Math.round(progress.progress)));
+            setStatus(`Baixando a IA gratuita… ${pct}%`,'loading');
+          }else if(progress?.status==='initiate'){
+            setStatus('Preparando os arquivos da IA…','loading');
+          }else if(progress?.status==='done'){
+            setStatus('Arquivos da IA carregados. Preparando o modelo…','loading');
+          }
         }
-      }else{
-        localAIMode='WASM';
-        localAI=await pipeline('text-generation',model,{dtype:'q4',device:'wasm'});
-      }
-      setStatus(`IA carregada no seu dispositivo (${localAIMode}).`,'ready');
+      });
+      setStatus(`IA carregada e pronta (${localAIMode}).`,'ready');
       return localAI;
     }catch(err){
-      console.error(err);
+      console.error('PlanejaEdu IA:',err);
       localAI=null;
       localAIMode='offline';
-      setStatus('Não foi possível carregar a IA local. O gerador estruturado continua disponível.','error');
+      const msg=String(err?.message||err||'erro desconhecido');
+      if(/WebGPU|GPU|shader|adapter/i.test(msg)){
+        setStatus('A GPU deste navegador não pôde ser usada. Tente novamente; o modo CPU será usado quando disponível.','error');
+      }else if(/fetch|network|CORS|Failed to fetch/i.test(msg)){
+        setStatus('Não foi possível baixar a IA. Verifique a internet e tente novamente.','error');
+      }else{
+        setStatus('A IA não conseguiu carregar. Clique em “Carregar IA” para tentar novamente.','error');
+      }
       throw err;
-    }finally{localAILoading=null;}
+    }finally{ localAILoading=null; }
   })();
   return localAILoading;
 }
@@ -63,7 +83,7 @@ async function generateWithAI({type,grade,sub,prompt,shift,header,conversation=f
    : `Tipo de material: ${type}\nAno/série: ${grade}\nDisciplina: ${sub}\nTurno: ${shift}\nCabeçalho: ${header}\nTema/pedido da professora: ${prompt}\n\nCrie agora o material completo. Para ${type}, inclua todos os elementos que normalmente seriam necessários para uso em sala de aula. Se for Slides, entregue 8 slides numerados com título, texto curto, atividade/visual sugerido e fala da professora. Se for Prova e avaliação, entregue questões variadas e gabarito. Se for Lista de exercícios, entregue exercícios graduados e gabarito. Se for Jogo educativo, crie regras, preparação, rodadas, perguntas e pontuação. Se for Mapa mental, organize uma estrutura hierárquica pronta para visualização. Se for Adaptação, adapte concretamente o material para necessidades educacionais diversas. Se for Comunicação, entregue uma mensagem pronta para enviar. Se for Assistente IA, responda diretamente à pergunta.`;
  const messages=[{role:'system',content:aiSystemPrompt(type)},{role:'user',content:userPrompt}];
  const out=await generator(messages,{max_new_tokens:700,temperature:0.65,do_sample:true,return_full_text:false});
- let text=Array.isArray(out) ? out[0]?.generated_text : (out?.generated_text || '');
+ let text=Array.isArray(out)?out[0]?.generated_text:'' : out?.generated_text || '';
  if(Array.isArray(text)) text=text[text.length-1]?.content || text.map(x=>x.content||'').join('\n');
  if(!text) throw new Error('A IA não retornou texto.');
  return String(text).trim();
@@ -74,8 +94,7 @@ function showAIPanel(){
  if(el) el.scrollIntoView({behavior:'smooth',block:'center'});
 }
 
-let data=defaultData;
-try{ const saved=JSON.parse(localStorage.getItem(KEY)||"null"); if(saved && typeof saved==="object") data={...defaultData,...saved,headers:Array.isArray(saved.headers)&&saved.headers.length?saved.headers:defaultData.headers,classes:Array.isArray(saved.classes)?saved.classes:[],students:Array.isArray(saved.students)?saved.students:[],materials:Array.isArray(saved.materials)?saved.materials:[]}; }catch(e){ console.warn("Dados locais corrompidos; iniciando novo espaço.",e); localStorage.removeItem(KEY); }
+let data=JSON.parse(localStorage.getItem(KEY)||"null")||defaultData;
 function save(){localStorage.setItem(KEY,JSON.stringify(data))}
 function show(id){$$(".screen").forEach(x=>x.classList.add("hidden"));$("#"+id).classList.remove("hidden")}
 function toast(t){const x=$("#toast");x.textContent=t;x.style.display="block";setTimeout(()=>x.style.display="none",2600)}
